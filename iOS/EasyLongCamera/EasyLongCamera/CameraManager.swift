@@ -1,12 +1,23 @@
 import AVFoundation
 import Photos
-import Combine
+
+/// 撮影モード
+enum ShootingMode {
+    case bulb    // バルブ：押している間だけ露光
+    case timer   // タイマー：指定した秒数で露光
+}
 
 class CameraManager: NSObject, ObservableObject {
     // MARK: - Published Properties
     @Published var session = AVCaptureSession()
     @Published var isCapturing = false
     @Published var elapsedSeconds: Double = 0.0  // 露光中の経過時間表示用
+
+    /// 現在の撮影モード
+    @Published var shootingMode: ShootingMode = .bulb
+
+    /// タイマーモード用：選択された露光時間（秒）
+    @Published var selectedExposureSeconds: Double = 1.0
 
     // MARK: - Private Properties
     private var device: AVCaptureDevice?
@@ -15,6 +26,9 @@ class CameraManager: NSObject, ObservableObject {
     // バルブ撮影用タイマー
     private var exposureTimer: Timer?
     private var exposureStartTime: Date?
+
+    // タイマーモード用カウントダウンタイマー
+    private var countdownTimer: Timer?
 
     // MARK: - Setup
     func checkPermissions() {
@@ -51,43 +65,60 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Bulb Exposure Control
+    // MARK: - Bulb Mode
 
-    /// BLEボタンが押された → 露光開始
+    /// バルブ：ボタンが押された → 露光開始
     func startExposure() {
         guard !isCapturing else { return }
-
         DispatchQueue.main.async {
             self.isCapturing = true
             self.elapsedSeconds = 0.0
             self.exposureStartTime = Date()
         }
-
-        // 経過時間を0.1秒ごとに更新するタイマー
         exposureTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self, let start = self.exposureStartTime else { return }
             DispatchQueue.main.async {
                 self.elapsedSeconds = Date().timeIntervalSince(start)
             }
         }
-
-        print("CameraManager: Exposure started")
+        print("CameraManager: [Bulb] Exposure started")
     }
 
-    /// BLEボタンが離された → 露光時間確定して撮影
+    /// バルブ：ボタンが離された → 露光時間確定して撮影
     func stopExposureAndCapture() {
         guard isCapturing, let startTime = exposureStartTime else { return }
-
         exposureTimer?.invalidate()
         exposureTimer = nil
-
-        let duration = Date().timeIntervalSince(startTime)
-        print("CameraManager: Exposure stopped. Duration = \(String(format: "%.2f", duration))s")
-
-        // 最低0.1秒は確保する
-        let clampedDuration = max(duration, 0.1)
-        captureWithExposure(seconds: clampedDuration)
+        let duration = max(Date().timeIntervalSince(startTime), 0.1)
+        print("CameraManager: [Bulb] Exposure stopped. Duration = \(String(format: "%.2f", duration))s")
+        captureWithExposure(seconds: duration)
     }
+
+    // MARK: - Timer Mode
+
+    /// タイマー：ボタンを押したら指定秒数で撮影開始
+    func startTimerCapture() {
+        guard !isCapturing else { return }
+        DispatchQueue.main.async {
+            self.isCapturing = true
+            self.elapsedSeconds = 0.0
+        }
+        let target = selectedExposureSeconds
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.elapsedSeconds += 0.1
+                if self.elapsedSeconds >= target {
+                    self.countdownTimer?.invalidate()
+                    self.countdownTimer = nil
+                    self.captureWithExposure(seconds: target)
+                }
+            }
+        }
+        print("CameraManager: [Timer] Capture started. Target = \(target)s")
+    }
+
+    // MARK: - Common Capture
 
     private func captureWithExposure(seconds: Double) {
         guard let device = device else {
@@ -97,25 +128,20 @@ class CameraManager: NSObject, ObservableObject {
 
         do {
             try device.lockForConfiguration()
-
             if device.isExposureModeSupported(.custom) {
-                let requestedDuration = CMTime(seconds: seconds, preferredTimescale: 1000)
-                // デバイスの許容範囲内に収める
-                let minDuration = device.activeFormat.minExposureDuration
-                let maxDuration = device.activeFormat.maxExposureDuration
-                let clampedDuration = min(max(requestedDuration, minDuration), maxDuration)
-
-                // ISO最小値（ノイズ低減）
+                let requested = CMTime(seconds: seconds, preferredTimescale: 1000)
+                let minDur = device.activeFormat.minExposureDuration
+                let maxDur = device.activeFormat.maxExposureDuration
+                let clamped = min(max(requested, minDur), maxDur)
                 let iso = device.activeFormat.minISO
 
-                device.setExposureModeCustom(duration: clampedDuration, iso: iso) { [weak self] _ in
-                    // 露光設定完了後に撮影
+                device.setExposureModeCustom(duration: clamped, iso: iso) { [weak self] _ in
+                    guard let self = self else { return }
                     let settings = AVCapturePhotoSettings()
                     settings.photoQualityPrioritization = .quality
-                    self?.photoOutput.capturePhoto(with: settings, delegate: self!)
+                    self.photoOutput.capturePhoto(with: settings, delegate: self)
                 }
             }
-
             device.unlockForConfiguration()
         } catch {
             print("CameraManager: Error locking configuration: \(error)")
@@ -139,8 +165,8 @@ extension CameraManager: AVCapturePhotoCaptureDelegate {
         PHPhotoLibrary.requestAuthorization { status in
             guard status == .authorized else { return }
             PHPhotoLibrary.shared().performChanges({
-                let creationRequest = PHAssetCreationRequest.forAsset()
-                creationRequest.addResource(with: .photo, data: data, options: nil)
+                let req = PHAssetCreationRequest.forAsset()
+                req.addResource(with: .photo, data: data, options: nil)
             }) { success, error in
                 if success {
                     print("CameraManager: Photo saved to library")

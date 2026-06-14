@@ -1,10 +1,11 @@
 # EasyLongCamera
 
-EasyLongCamera is a "Bulb mode" (long exposure) camera application for iPhone, paired with an M5Atom Lite acting as a custom BLE remote shutter.
+EasyLongCamera is a long exposure camera application for iPhone, paired with an M5Atom Lite acting as a custom BLE remote shutter.
 
 ## Features
 
-- **True Bulb Mode Experience**: Press and hold the button on the M5Atom Lite to start the exposure. Release the button to stop the exposure and capture the photo.
+- **Bulb Mode**: Press and hold the button on the M5Atom Lite (or the on-screen button) to start the exposure. Release to stop and capture. Ideal for capturing the exact moment a phenomenon begins and ends.
+- **Timer Mode**: Select a preset exposure time (0.5s / 1s / 2s / 4s / 8s / 15s / 30s) and press the button once to start. The app automatically captures after the specified duration. Ideal for consistent, repeatable shots.
 - **Custom GATT Service**: Uses a custom BLE GATT service to accurately detect both "button pressed" and "button released" events, overcoming the limitations of standard BLE HID keyboards.
 - **Visual Feedback**: The iPhone app displays the elapsed exposure time in real-time, and the M5Atom Lite's LED changes color based on connection and button states.
 
@@ -15,8 +16,15 @@ EasyLongCamera is a "Bulb mode" (long exposure) camera application for iPhone, p
 
 ## Hardware Requirements
 
-- **iPhone**: iOS 15.0 or later (for SwiftUI and AVFoundation support).
+- **iPhone**: iOS 15.0 or later.
 - **M5Atom Lite**: ESP32-based microcontroller.
+
+## Shooting Modes
+
+| Mode | How to Shoot | Best For |
+|---|---|---|
+| **Bulb** | Hold button → Release to capture | Capturing phenomena with unknown duration |
+| **Timer** | Select duration → Tap once to shoot | Consistent, repeatable long exposures |
 
 ## Setup Instructions
 
@@ -28,7 +36,7 @@ EasyLongCamera is a "Bulb mode" (long exposure) camera application for iPhone, p
 3. Select `M5Atom` as the board and upload the sketch.
 4. **LED Status Guide**:
    - 🔴 Red: Disconnected / Advertising
-   - 🟢 Green: Connected to iPhone
+   - 🟢 Green: Connected to iPhone (standby)
    - 🔵 Blue: Button is being pressed (Exposure active)
 
 ### 2. iPhone App
@@ -40,15 +48,14 @@ EasyLongCamera is a "Bulb mode" (long exposure) camera application for iPhone, p
    - `NSPhotoLibraryAddUsageDescription` : "Used to save captured photos to your library."
    - `NSBluetoothAlwaysUsageDescription` : "Used to connect to the M5Atom Lite remote shutter."
 4. Build and run the app on your iPhone.
-5. The app will automatically scan and connect to the "M5Atom Shutter" device. No manual pairing in iOS Settings is required!
+5. The app will automatically scan and connect to the "M5Atom Shutter" device. No manual pairing in iOS Settings is required.
 
 ## How it Works
 
-1. **BLE Connection**: The iOS app uses `CoreBluetooth` to scan for a specific Service UUID (`12345678-1234-1234-1234-123456789012`). Once found, it connects and subscribes to notifications on the Characteristic UUID.
-2. **Event Detection**: The M5Atom Lite sends a notification with value `0x01` when the button is pressed, and `0x00` when released.
-3. **Exposure Control**: 
-   - On `0x01` (Press): The app starts a timer and updates the UI.
-   - On `0x00` (Release): The app stops the timer, calculates the exact duration the button was held, and uses `AVCaptureDevice.setExposureModeCustom` to capture the photo with that exact exposure time.
+1. **BLE Connection**: The iOS app uses `CoreBluetooth` to scan for the custom Service UUID. Once found, it connects and subscribes to notifications on the Characteristic.
+2. **Event Detection**: The M5Atom Lite sends `0x01` on button press and `0x00` on button release.
+3. **Bulb Mode**: On `0x01` (Press), the app starts a timer. On `0x00` (Release), the app captures with the measured duration as the exposure time.
+4. **Timer Mode**: On `0x01` (Press), the app starts a countdown. After the selected duration, the app automatically captures the photo.
 
 ## License
 
