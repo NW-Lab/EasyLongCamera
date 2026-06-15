@@ -30,6 +30,17 @@ struct ContentView: View {
                 .cornerRadius(20)
                 .padding(.top, 50)
 
+                if let notice = cameraManager.captureNotice {
+                    Text(notice)
+                        .font(.caption2)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.55))
+                        .cornerRadius(12)
+                        .padding(.top, 8)
+                }
+
                 Spacer()
 
                 // ── 中央：露光中の経過時間 ──
@@ -138,7 +149,7 @@ struct ContentView: View {
 
     // MARK: - Shutter Gesture
 
-    private var shutterGesture: some Gesture {
+    private var shutterGesture: AnyGesture<()> {
         switch cameraManager.shootingMode {
         case .bulb:
             // バルブ：長押しで露光開始、離したら撮影
@@ -154,6 +165,7 @@ struct ContentView: View {
                             cameraManager.stopExposureAndCapture()
                         }
                     }
+                    .map { _ in () }
             )
         case .timer:
             // タイマー：タップで撮影開始（指定秒数後に自動撮影）
@@ -164,7 +176,6 @@ struct ContentView: View {
                             cameraManager.startTimerCapture()
                         }
                     }
-                    .map { _ in DragGesture.Value?.none }
                     .map { _ in () }
             )
         }
@@ -213,6 +224,12 @@ struct ContentView: View {
 
     // MARK: - BLE Status UI
     private var bleStatusColor: Color {
+        if cameraManager.isSavingPhoto {
+            return .blue
+        }
+        if cameraManager.isCapturing {
+            return .red
+        }
         switch bleManager.connectionState {
         case .connected:    return .green
         case .connecting:   return .yellow
@@ -222,10 +239,22 @@ struct ContentView: View {
     }
 
     private var bleStatusText: String {
+        if cameraManager.isSavingPhoto {
+            return "Saving Photo..."
+        }
+        if cameraManager.isCapturing {
+            switch cameraManager.shootingMode {
+            case .bulb:
+                return "Bulb Capturing..."
+            case .timer:
+                return "Timer Capturing..."
+            }
+        }
+
         switch bleManager.connectionState {
         case .connected:    return "M5Atom Connected"
         case .connecting:   return "Connecting..."
-        case .scanning:     return "Scanning..."
+        case .scanning:     return "BLE Scanning..."
         case .disconnected: return "Disconnected"
         }
     }
